@@ -1,0 +1,77 @@
+TABLES:
+* Users
+    -user_id, status(admin/candidate), name, registration_date
+
+* Exams
+    -exam_id, title, creation_date
+
+* Questions
+    -question_id, exam_id, question_statement
+
+* Options
+    -option_id, question_id, option_statement, option(A, B, C,...), correct(yes/no)
+
+* Selected
+    -selection_id, option_id, user_id, session_id, selection(A, B, C,...)
+
+* ExamSessions
+    -session_id, admin_id, exam_id, session_duration, session_status(in/out), average_score, score_SD
+
+* SessionCandidates
+    -session_candidate_id, session_id, user_id, exam_score
+
+PSEUDO
+    -if (create user):
+        -input status, name
+        -connect to db
+        -access Users
+        -insert user - assign user_id(auto-increment) and date(getDate()) automatically
+        -release db connection
+    -fi
+    -if (create exam):
+           -verify user(examiner)
+           -take input
+           -connect to db
+           -access Exams
+           -insert exam
+           -access Questions
+           -insert question
+           -access Options
+           -insert options
+           -release db connection
+    -fi
+    -if (create session):
+        -verify user(examiner)
+        -take input
+        -connect to db
+        -access ExamSessions
+        -insert examSession
+        -create thread pool
+    -fi
+
+    -while timer:
+        -if (user admission):
+            -verify user_id(candidate), verify session_id(exists)
+            -allocate thread
+            -acquire db connection
+            -access SessionCandidates
+            -insert sessionCandidate with session_candidate_id, session_id
+        -fi
+        -if (submission):
+            -allocate thread
+            -calculate result
+            -acquire db connection - wait()
+            -write to database:
+                -access Selected
+                -write selections
+                -access sessionCandidate 
+                -write exam_score
+            -release db connection - signal()
+            -deallocate thread
+        -fi
+        -if (timeup):
+            -close submissions
+            -connect to db
+            -access ExamSessions
+            -edit examSession - session_status(out), save average_score, score_SD
+        -fi
