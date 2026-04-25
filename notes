@@ -75,3 +75,9 @@ PSEUDO
             -access ExamSessions
             -edit examSession - session_status(out), save average_score, score_SD
         -fi
+
+FUNCTIONS
+* user_create()
+* exam_create()
+* create_session()
+* begin_session()
