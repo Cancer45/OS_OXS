@@ -1,6 +1,0 @@
-*.o
-.flavor
-.objs
-OnlineExamSystem.so
-assets.h
-cert
