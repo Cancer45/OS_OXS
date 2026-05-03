@@ -1,9 +1,13 @@
 #ifndef EXAM_SYS_STRUCTS
 #define EXAM_SYS_STRUCTS
+
 #include <stdint.h>
+#include <semaphore.h>
+#include <sys/epoll.h>
 #include "dbh.h"
 
 #define DATE_SIZE 11
+#define DB_CONN_LIMIT 10
 
 struct User
 {
@@ -25,7 +29,7 @@ struct Question
     char question_statement[500];
 };
 
-struct Options
+struct Option
 {
     int option_id, question_id;
     char option_statement[50];
@@ -34,17 +38,17 @@ struct Options
 
 struct Selected
 {
-    int selection_id, option_id, user_id, session_id;
+    int selection_id, option_id, session_candidate_id;
 };
 
-struct ExamSessions
+struct ExamSession
 {
     int session_id, admin_id, exam_id;
     int session_duration, session_status;
     float average_score, score_SD;
 };
 
-struct SessionCandidates
+struct SessionCandidate
 {
     int session_candidate_id, session_id, user_id;
     float exam_score;
@@ -53,6 +57,30 @@ struct SessionCandidates
 struct DbIODetails
 {
     MYSQL* connection;
+    void* data;
+};
+
+struct ConnectionSlot
+{
+    MYSQL* connection;
+    int index;
+    uint8_t avail;
+};
+
+struct RequestHandlerParams
+{
+    int efd, sfd, rfd;
+    int *total_connections;
+    sem_t *free_slots;
+    pthread_mutex_t *slots_lock;
+    struct ConnectionSlot *connection_slots;
+};
+
+
+struct ClientHandlerParams
+{
+    MYSQL* connection;
+    int efd, cfd;
     void* data;
 };
 

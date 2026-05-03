@@ -2,10 +2,10 @@
 #define DBH_H
 #include <mysql/mysql.h>
 
-static const char *mysql_server = "localhost";
-static const char *mysql_user = "os_dev";
-static const char *mysql_password = "123";
-static const char *mysql_database = "online_exam_system";
+#define MYSQL_SERVER "localhost"
+#define MYSQL_USER   "os_dev"
+#define MYSQL_PASSWD "123"
+#define MYSQL_DB     "online_exam_system"
 
 struct ConnectionDetails
 {
