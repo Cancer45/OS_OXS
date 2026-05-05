@@ -1,4 +1,6 @@
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -6,223 +8,154 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <errno.h>
+#include <mysql/mysql.h>
 #include "../headers/socks.h"
 #include "../headers/structs.h"
-#include "../headers/interdb.h"
 #include "../headers/handlers.h"
+#include "../headers/interdb.h"
 
-int create_user(struct ClientHandlerParams params)
+
+void create_user(struct ClientHandlerParams params)
 {
+}
+
+void create_session(struct ClientHandlerParams params)
+{
+}
+
+void create_exam(struct ClientHandlerParams params)
+{
+    //reconstruct exam paper
+    struct ExamPaper *exam_paper = (struct ExamPaper*)params.data;
+    params.data += sizeof(struct ExamPaper);
+
+    //prepare response header
+    struct ResponseHeader create_exam_response;
+
+    //point to questions
+    exam_paper->questions = params.data; //this is actually questions & options
+
+    //point to options
+    void* options_start_here = params.data + (sizeof(struct FullQuestion) * exam_paper->n_questions);
+    for (int i = 0; i < exam_paper->n_questions; i++)
+    {
+        //skip 4 options for every new set (of options)
+        exam_paper->questions[i].options = options_start_here + (sizeof(struct FullOption) * 4 * i);
+    }
+
+    //write to database
+    //write exam paper & record exam_id
+    //for each question:
+    //write question & record question_id
+    //for each option, write option
+
+    char query[500];
+    int exam_id, question_id;
+
+    //insert exam
+    snprintf(query, sizeof(query),
+            "INSERT INTO Exams(user_id, title) VALUES(%d, '%s')",
+            exam_paper->user_id, exam_paper->title);
+    printf("executing query: %s\n", query);
+    mysql_execute_query(params.connection, query);
+
+    exam_id = mysql_insert_id(params.connection);
+    for (int i = 0; i < exam_paper->n_questions; i++)
+    {
+        //insert question
+        snprintf(query, sizeof(query),
+                "INSERT INTO Questions(exam_id, question_statement) VALUES(%d, '%s')",
+                exam_id,
+                exam_paper->questions[i].question_statement);
+        printf("executing query: %s\n", query);
+        mysql_execute_query(params.connection, query);
+        question_id = mysql_insert_id(params.connection);
+
+        for (int j = 0; j < 4; j++)
+        {
+            snprintf(query, sizeof(query),
+                    "INSERT INTO Options(question_id, option_statement, is_correct) VALUES(%d, '%s', %d)",
+                    question_id,
+                    exam_paper->questions[i].options[j].option_statement,
+                    exam_paper->questions[i].options[j].is_correct);
+            printf("executing query: %s\n", query);
+            mysql_execute_query(params.connection, query);
+        }
+    }
+
+    //check if error
+    if (!mysql_errno(params.connection))
+        create_exam_response.status_code = CREATED;
+    else
+        create_exam_response.status_code = (uint8_t)INTERNAL_SERVER_ERROR;
+
+    //respond
+    write(params.cfd, &create_exam_response, sizeof(struct ResponseHeader));
+}
+
+void get_user(struct ClientHandlerParams params)
+{
+    //cast data to struct User
     struct User *user = (struct User *) params.data;
 
-    struct DbIODetails io_details =
+    //prepare response header
+    struct ResponseHeader get_user_response = {.status_code = OK};
+
+    //query database
+    char query[500];
+
+    //construct query string
+    snprintf(query, sizeof(query),
+        "SELECT * FROM Users WHERE username = '%s'",
+        user->username);
+
+    //execute query
+    printf("executing query: %s\n", query);
+    MYSQL_RES *result = mysql_execute_query(params.connection, query);
+
+    //fetch result
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row)
     {
-        .connection = params.connection,
-        .data       = user
-    };
-
-    setUser(&io_details);
-
-    if (write(params.cfd, (void *) user, sizeof(struct User)) == -1)
-        perror("write create_user");
-
-    return CREATED;
-}
-
-int create_exam(struct ClientHandlerParams params)
-{
-    struct Exam *exam = (struct Exam *) params.data;
-
-    struct DbIODetails io_details =
+        mysql_free_result(result);
+        get_user_response.status_code = (uint8_t)NOT_FOUND;
+    }
+    else
     {
-        .connection = params.connection,
-        .data       = exam
-    };
+        //re-format and store in struct User
+        char *end_ptr;
+        user->user_id = (int) strtol(row[0], &end_ptr, 10);
+        user->status  = atoi(row[2]);
+        strncpy(user->name,              row[3], sizeof(user->name)              - 1);
+        strncpy(user->registration_date, row[4], sizeof(user->registration_date) - 1);
 
-    setExam(&io_details);
-
-    if (write(params.cfd, (void *) exam, sizeof(struct Exam)) == -1)
-        perror("write create_exam");
-
-    return CREATED;
-}
-
-int create_session(struct ClientHandlerParams params)
-{
-    struct ExamSession *session = (struct ExamSession *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = session
-    };
-
-    setExamSessions(&io_details);
-
-    if (write(params.cfd, (void *) session, sizeof(struct ExamSession)) == -1)
-        perror("write create_session");
-
-    return CREATED;
-}
-
-int admit_candidate(struct ClientHandlerParams params)
-{
-    struct SessionCandidate *candidate = (struct SessionCandidate *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = candidate
-    };
-
-    setSessionCandidates(&io_details);
-
-    if (write(params.cfd, (void *) candidate, sizeof(struct SessionCandidate)) == -1)
-        perror("write admit_candidate");
-
-    return CREATED;
-}
-
-int collect_candidate(struct ClientHandlerParams params)
-{
-    struct Selected *selected = (struct Selected *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = selected
-    };
-
-    setSelected(&io_details);
-
-    if (write(params.cfd, (void *) selected, sizeof(struct Selected)) == -1)
-        perror("write collect_candidate");
-
-    return CREATED;
-}
-
-int get_user(struct ClientHandlerParams params)
-{
-    struct User *user = (struct User *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = user
-    };
-
-    getUser(&io_details);
-
+        //free result
+        mysql_free_result(result);
+    }
+    
+    //respond
+    write(params.cfd, &get_user_response, sizeof(struct ResponseHeader));
     if (write(params.cfd, (void *) user, sizeof(struct User)) == -1)
         perror("write get_user");
-
-    return OK;
 }
 
-int get_exam(struct ClientHandlerParams params)
+void admit_candidate(struct ClientHandlerParams params)
 {
-    struct Exam *exam = (struct Exam *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = exam
-    };
-
-    getExam(&io_details);
-
-    if (write(params.cfd, (void *) exam, sizeof(struct Exam)) == -1)
-        perror("write get_exam");
-
-    return OK;
 }
 
-int get_question(struct ClientHandlerParams params)
+void collect_candidate(struct ClientHandlerParams params)
 {
-    struct Question *q = (struct Question *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = q
-    };
-
-    getQuestion(&io_details);
-
-    if (write(params.cfd, (void *) q, sizeof(struct Question)) == -1)
-        perror("write get_question");
-
-    return OK;
 }
 
-int get_option(struct ClientHandlerParams params)
-{
-    struct Option *o = (struct Option *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = o
-    };
-
-    getOption(&io_details);
-
-    if (write(params.cfd, (void *) o, sizeof(struct Option)) == -1)
-        perror("write get_option");
-
-    return OK;
-}
-
-int create_question(struct ClientHandlerParams params)
-{
-    struct Question *q = (struct Question *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = q
-    };
-
-    setQuestions(&io_details);
-
-    if (write(params.cfd, (void *) q, sizeof(struct Question)) == -1)
-        perror("write create_question");
-
-    return CREATED;
-}
-
-int create_option(struct ClientHandlerParams params)
-{
-    struct Option *o = (struct Option *) params.data;
-
-    struct DbIODetails io_details =
-    {
-        .connection = params.connection,
-        .data       = o
-    };
-
-    setOptions(&io_details);
-
-    if (write(params.cfd, (void *) o, sizeof(struct Option)) == -1)
-        perror("write create_option");
-
-    return CREATED;
-}
-
-typedef int (*Handler)(struct ClientHandlerParams);
+typedef void (*Handler)(struct ClientHandlerParams);
 static Handler router[] =
 {
-    create_user,        /* 0  CMD_CREATE_USER */
-    create_exam,        /* 1  CMD_CREATE_EXAM */
-    create_session,     /* 2  CMD_CREATE_SESSION */
-    admit_candidate,    /* 3  CMD_ADMIT_CANDIDATE */
-    collect_candidate,  /* 4  CMD_COLLECT_CANDIDATE */
-    get_user,           /* 5  CMD_GET_USER */
-    get_exam,           /* 6  CMD_GET_EXAM */
-    get_question,       /* 7  CMD_GET_QUESTION */
-    get_option,         /* 8  CMD_GET_OPTION */
-    create_question,    /* 9  CMD_CREATE_QUESTION */
-    create_option       /* 10 CMD_CREATE_OPTION */
+    create_user,        // 0  CMD_CREATE_USER
+    create_exam,        // 1  CMD_CREATE_EXAM
+    create_session,     // 2  CMD_CREATE_SESSION
+    admit_candidate,    // 3  CMD_ADMIT_CANDIDATE
+    collect_candidate,   // 4  CMD_COLLECT_CANDIDATE
+    get_user,           // 5  CMD_GET_USER
 };
 
 static const int ROUTER_SIZE = (int)(sizeof(router) / sizeof(router[0]));
@@ -316,9 +249,9 @@ int handle_client(int efd, int cfd, MYSQL *connection)
         .data       = payload
     };
 
-    int result = router[rh.cmd_id](chp);
+    router[rh.cmd_id](chp);
     free(payload);
-    return result;
+    return 0;
 }
 
 void* request_handler(void* args)

@@ -36,6 +36,28 @@ struct Option
     int is_correct;
 };
 
+struct FullOption
+{
+    char option_statement[50];
+    int is_correct;
+};
+
+struct FullQuestion
+{
+    int size;
+    char question_statement[500];
+    struct FullOption *options;
+    int is_correct;
+};
+
+struct ExamPaper
+{
+    int user_id;
+    char title[100];
+    int n_questions;
+    struct FullQuestion *questions;
+};
+
 struct Selected
 {
     int selection_id, option_id, session_candidate_id;
@@ -94,7 +116,6 @@ struct RequestHeader
 struct ResponseHeader
 {
     uint8_t status_code;
-    uint16_t cmd_id;
     uint32_t payload_size;
 };
 
